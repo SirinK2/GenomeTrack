@@ -124,32 +124,6 @@ leaving clients a second parse path.
 
 ---
 
-## Two bugs worth keeping in the history
-
-Both were found by running the thing, not by reading it, and both are the kind that pass unit
-tests and fail in production.
-
-**Timestamp precision.** `DateTimeOffset` counts 100-nanosecond ticks. PostgreSQL `timestamptz`
-stores microseconds. Hashing the un-rounded value and letting the database round it on write
-produced rows that could not reproduce their own hash — *every* chain verified as broken at its
-first link, on data nobody had touched. In-memory tests never round, so they were green the
-whole time. Fixed by truncating to milliseconds before the value is hashed or stored, which
-holds at any precision a mainstream database offers.
-
-**Entity state on a navigation add.** `BaseEntity` assigns its own `Guid`, so by the time change
-detection saw a `RunSample` added through `run.RunSamples`, its key was already populated. EF
-read that as an existing row, tracked it `Modified`, and failed on save with
-*"Attempted to update or delete an entity that does not exist in the store."* Fixed by adding
-through the `DbSet` so the state is set explicitly.
-
-There is also a design note in `AppDbContext`: this model deliberately has **no global
-soft-delete query filters**. EF turns a filter into an inner join across a required navigation,
-so a soft-deleted actor silently removes every custody event referencing them. A vanished audit
-row is the worst failure this system has, and it fails quietly. Each service filters
-`IsDeleted` explicitly instead.
-
----
-
 ## Stack
 
 **API** — ASP.NET Core 9 · EF Core 9 · PostgreSQL 16 · JWT (HS256) · Serilog · Swagger/OpenAPI ·
