@@ -19,17 +19,34 @@ So the custody trail here is **hash-chained and append-only**. Each event stores
 own contents plus the hash of the event before it. Editing history is detectable, and the
 verifier says exactly which link broke and how.
 
-```
-$ psql -c "UPDATE custody_events SET \"ToLocation\" = 'Freezer B' WHERE \"Sequence\" = 3;"
-UPDATE 1
+### Seeing it work
 
-$ GET /api/v1/samples/{id}/custody
-intact      : false
-broken at   : #3
-explanation : This event's contents no longer match its hash; the row was edited after it was written.
+A chain nobody has touched:
+
+![Verified chain of custody](docs/02-chain-intact.png)
+
+Now edit one row straight in the database, the way anyone with a `psql` prompt could:
+
+```sql
+UPDATE custody_events SET "ToLocation" = 'Freezer B / Shelf 9' WHERE "Sequence" = 3;
 ```
 
----
+No API call, no application code involved. The next verification says which link broke and why
+— and the timeline itself now contradicts: event 3 claims the sample went to Freezer B, while
+event 4 still departs from Freezer A.
+
+![Broken chain of custody](docs/03-chain-broken.png)
+
+### The same call, seen by three roles
+
+Release is the point of no return, so only a principal investigator can do it. Everyone else
+sees the state, not the button — and a technician does not see a provisional interpretation at
+all. The API enforces all of this; the client only reflects it.
+
+| Principal investigator | Analyst | Technician |
+|---|---|---|
+| ![PI](docs/04-release-pi.png) | ![Analyst](docs/05-provisional-analyst.png) | ![Technician](docs/06-technician-view.png) |
+| Can release | Sees it, cannot release | Never sees the unreleased one |
 
 ## The rules the domain enforces
 
@@ -52,8 +69,16 @@ These are the parts worth reading; the CRUD around them is unremarkable.
 ## Running it
 
 ```bash
-docker compose up -d --build
+docker compose up -d --build          # API + PostgreSQL
 open http://localhost:8080/swagger
+```
+
+The reference client is a Flutter web app in `client/`:
+
+```bash
+cd client
+flutter pub get
+flutter run -d chrome --web-port 8081   # the API allows this origin in development
 ```
 
 Three seeded accounts, all with password `Passw0rd!` (Development only — the seeder refuses to
@@ -66,7 +91,8 @@ run in any other environment):
 | `pi@genometrack.local` | PrincipalInvestigator | Everything, plus **release** |
 
 ```bash
-dotnet test          # 28 unit tests
+dotnet test                 # 28 unit tests
+cd client && flutter analyze
 ```
 
 ---
@@ -83,6 +109,9 @@ Application/      DTOs, service interfaces + implementations, Result envelope.
 Infrastructure/   DbContext, EF configurations, migrations, hashing, seeders.
 API/              Controllers, JWT, policies, middleware.
 UnitTest/         28 tests over the rules above.
+
+client/           Flutter web reference client. Cubits over a single ApiClient,
+                  no business rules of its own — it renders what the API allows.
 ```
 
 Every endpoint answers the same envelope, including 401 and 403 — those short-circuit in
@@ -123,7 +152,9 @@ row is the worst failure this system has, and it fails quietly. Each service fil
 
 ## Stack
 
-ASP.NET Core 9 · EF Core 9 · PostgreSQL 16 · JWT (HS256) · Serilog · Swagger/OpenAPI ·
+**API** — ASP.NET Core 9 · EF Core 9 · PostgreSQL 16 · JWT (HS256) · Serilog · Swagger/OpenAPI ·
 xUnit + FluentAssertions · Docker Compose · GitHub Actions
+
+**Client** — Flutter 3 · flutter_bloc (Cubit) · http · Material 3
 
 CI builds with `-warnaserror`, runs the test suite, and rebuilds the image on every push.

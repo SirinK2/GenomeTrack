@@ -82,6 +82,18 @@ builder.Services.AddAuthorizationBuilder()
         policy => policy.RequireRole(nameof(LabRole.PrincipalInvestigator))
     );
 
+// The reference web client is served from a different origin in development, so the API has
+// to say so explicitly. Origins come from configuration rather than AllowAnyOrigin: credentials
+// are sent on these requests, and the two cannot be combined.
+var allowedOrigins =
+    builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+
+builder.Services.AddCors(options =>
+    options.AddDefaultPolicy(policy =>
+        policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod().AllowCredentials()
+    )
+);
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
@@ -157,6 +169,10 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI(o => o.SwaggerEndpoint("/swagger/v1/swagger.json", "GenomeTrack API v1"));
 }
+
+// Ahead of authentication: a rejected preflight never carries the headers the browser needs,
+// so a 401 on OPTIONS surfaces to the client as an opaque CORS error rather than as "log in".
+app.UseCors();
 
 app.UseAuthentication();
 app.UseAuthorization();
